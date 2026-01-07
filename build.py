@@ -28,11 +28,11 @@ def build():
         f"--distpath={os.path.join(base_dir, 'dist')}",
         f"--workpath={os.path.join(base_dir, 'build')}",
         f"--specpath={base_dir}",
-        # Add data files
-        f"--add-data={os.path.join(base_dir, 'resources')};resources",
-        # Hidden imports for QScintilla
-        "--hidden-import=PyQt5.Qsci",
-        "--hidden-import=PyQt6.Qsci",
+        # Exclude conflicting Qt packages
+        "--exclude-module=PyQt5",
+        "--exclude-module=PyQt6",
+        "--exclude-module=PyQt5.Qsci",
+        "--exclude-module=PyQt6.Qsci",
         # Main script
         os.path.join(base_dir, "main.py"),
     ]
