@@ -1,0 +1,17 @@
+{
+    "background": "#1e1e1e",
+    "foreground": "#d4d4d4",
+    "comment": "#6a9955",
+    "keyword": "#569cd6",
+    "string": "#ce9178",
+    "number": "#b5cea8",
+    "function": "#dcdcaa",
+    "class": "#4ec9b0",
+    "operator": "#d4d4d4",
+    "variable": "#9cdcfe",
+    "constant": "#4fc1ff",
+    "line_number": "#858585",
+    "current_line": "#2d2d2d",
+    "selection": "#264f78",
+    "caret": "#ffffff"
+}
