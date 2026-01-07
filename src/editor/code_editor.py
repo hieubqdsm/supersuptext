@@ -306,11 +306,20 @@ class CodeEditor(QPlainTextEdit):
         # Multi-cursor support
         self._multi_cursors = []  # List of (position, anchor) tuples
         self._multi_cursor_active = False
+        self._cursor_visible = True
+        self._blink_timer = QTimer(self)
+        self._blink_timer.timeout.connect(self._toggle_cursor_blink)
+        self._blink_timer.setInterval(500)  # Blink every 500ms
         
         self._setup_editor()
         self._setup_line_number_area()
         self._apply_theme()
         self._connect_signals()
+    
+    def _toggle_cursor_blink(self):
+        """Toggle cursor visibility for blinking effect."""
+        self._cursor_visible = not self._cursor_visible
+        self.viewport().update()  # Trigger repaint
     
     def _setup_editor(self):
         """Configure the editor settings."""
@@ -674,20 +683,23 @@ class CodeEditor(QPlainTextEdit):
         
         if len(self._multi_cursors) > 1:
             self._multi_cursor_active = True
+            self._blink_timer.start()
+            self._cursor_visible = True
             self._update_multi_cursor_display()
             print(f"Multi-cursor: {len(self._multi_cursors)} cursors active")
         else:
             self._multi_cursor_active = False
+            self._blink_timer.stop()
     
     def _update_multi_cursor_display(self):
-        """Update visual display of multi-cursors."""
+        """Update visual display of multi-cursor selections (cursors drawn in paintEvent)."""
         if not self._multi_cursors:
             return
         
         extra_selections = []
         doc_len = self.document().characterCount() - 1
         
-        # Highlight format for selections
+        # Selection highlight format
         sel_format = QTextCharFormat()
         sel_format.setBackground(QColor("#264f78"))
         sel_format.setForeground(QColor("#ffffff"))
@@ -698,26 +710,54 @@ class CodeEditor(QPlainTextEdit):
                 continue
             
             try:
-                selection = QTextEdit.ExtraSelection()
-                selection.format = sel_format
-                
-                cursor_sel = QTextCursor(self.document())
-                cursor_sel.setPosition(min(anchor, doc_len))
-                cursor_sel.setPosition(min(pos, doc_len), QTextCursor.MoveMode.KeepAnchor)
-                selection.cursor = cursor_sel
-                
-                extra_selections.append(selection)
+                # Selection highlight
+                if anchor != pos:
+                    selection = QTextEdit.ExtraSelection()
+                    selection.format = sel_format
+                    
+                    cursor_sel = QTextCursor(self.document())
+                    cursor_sel.setPosition(min(anchor, doc_len))
+                    cursor_sel.setPosition(min(pos, doc_len), QTextCursor.MoveMode.KeepAnchor)
+                    selection.cursor = cursor_sel
+                    
+                    extra_selections.append(selection)
             except:
                 pass
         
-        self.setExtraSelections(extra_selections)
+        self.setExtraSelections(extra_selections) 
+        self.viewport().update()  # Force repaint for cursors
+    
+    def paintEvent(self, event):
+        """Paint custom cursors for multi-cursor mode."""
+        super().paintEvent(event)
+        
+        if self._multi_cursor_active and self._cursor_visible:
+            painter = QPainter(self.viewport())
+            pen = QPen(QColor("#ffffff")) # White cursor
+            pen.setWidth(2)
+            painter.setPen(pen)
+            
+            doc_len = self.document().characterCount() - 1
+            
+            for anchor, pos in self._multi_cursors:
+                if anchor > doc_len or pos > doc_len:
+                    continue
+                    
+                cursor_pos = min(pos, doc_len)
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(cursor_pos)
+                
+                rect = self.cursorRect(cursor)
+                painter.drawLine(rect.topLeft(), rect.bottomLeft())
     
     def clearMultiCursors(self):
         """Clear all multi-cursors."""
         self._multi_cursors = []
         self._multi_cursor_active = False
+        self._blink_timer.stop()
         self.setExtraSelections([])
         self.highlightCurrentLine()
+        self.viewport().update()
     
     def toggleComment(self):
         """Toggle line comment."""
@@ -819,6 +859,11 @@ class CodeEditor(QPlainTextEdit):
             # Handle delete
             if event.key() == Qt.Key.Key_Delete:
                 self._multi_cursor_delete()
+                return
+            
+            # Handle arrow keys - move all cursors
+            if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+                self._multi_cursor_move(event.key())
                 return
         
         # Normal key handling
@@ -945,4 +990,37 @@ class CodeEditor(QPlainTextEdit):
         cursor.endEditBlock()
         
         self._multi_cursors = list(reversed(new_cursors))
+        self._update_multi_cursor_display()
+    
+    def _multi_cursor_move(self, key):
+        """Move all cursors in the given direction."""
+        doc_len = self.document().characterCount() - 1
+        new_cursors = []
+        
+        for anchor, pos in self._multi_cursors:
+            # Collapse selection to cursor position
+            cursor_pos = pos
+            
+            if key == Qt.Key.Key_Left:
+                new_pos = max(0, cursor_pos - 1)
+            elif key == Qt.Key.Key_Right:
+                new_pos = min(doc_len, cursor_pos + 1)
+            elif key == Qt.Key.Key_Up:
+                # Move up one line
+                c = QTextCursor(self.document())
+                c.setPosition(min(cursor_pos, doc_len))
+                c.movePosition(QTextCursor.MoveOperation.Up)
+                new_pos = c.position()
+            elif key == Qt.Key.Key_Down:
+                # Move down one line
+                c = QTextCursor(self.document())
+                c.setPosition(min(cursor_pos, doc_len))
+                c.movePosition(QTextCursor.MoveOperation.Down)
+                new_pos = c.position()
+            else:
+                new_pos = cursor_pos
+            
+            new_cursors.append((new_pos, new_pos))
+        
+        self._multi_cursors = new_cursors
         self._update_multi_cursor_display()
