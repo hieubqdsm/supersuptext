@@ -263,6 +263,11 @@ class MainWindow(QMainWindow):
         select_all_occurrences_action.setShortcut("Ctrl+Shift+L")
         select_all_occurrences_action.triggered.connect(self._select_all_occurrences)
         
+        # Alt+F3 - Sublime Text style shortcut for Select All Occurrences
+        select_all_alt_action = selection_menu.addAction("Select All (Alt+F3)")
+        select_all_alt_action.setShortcut("Alt+F3")
+        select_all_alt_action.triggered.connect(self._select_all_occurrences)
+        
         # ===== Search Menu =====
         search_menu = menubar.addMenu("&Search")
         

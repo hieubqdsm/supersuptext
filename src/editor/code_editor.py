@@ -303,6 +303,10 @@ class CodeEditor(QPlainTextEdit):
         self._language = 'Text'
         self._highlighter = None
         
+        # Multi-cursor support
+        self._multi_cursors = []  # List of (position, anchor) tuples
+        self._multi_cursor_active = False
+        
         self._setup_editor()
         self._setup_line_number_area()
         self._apply_theme()
@@ -642,8 +646,78 @@ class CodeEditor(QPlainTextEdit):
         # Note: Full multi-cursor support would require more complex implementation
     
     def selectAllOccurrences(self):
-        """Select all occurrences - not fully implemented."""
-        pass
+        """Select all occurrences of current selection (Alt+F3) - Multi-cursor mode."""
+        cursor = self.textCursor()
+        
+        # Get the word to search for
+        if not cursor.hasSelection():
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+            self.setTextCursor(cursor)
+        
+        search_text = cursor.selectedText()
+        if not search_text:
+            return
+        
+        # Find all occurrences
+        content = self.toPlainText()
+        self._multi_cursors = []
+        
+        start = 0
+        while True:
+            pos = content.find(search_text, start)
+            if pos == -1:
+                break
+            
+            # Store cursor position and anchor for selection
+            self._multi_cursors.append((pos, pos + len(search_text)))
+            start = pos + len(search_text)
+        
+        if len(self._multi_cursors) > 1:
+            self._multi_cursor_active = True
+            self._update_multi_cursor_display()
+            print(f"Multi-cursor: {len(self._multi_cursors)} cursors active")
+        else:
+            self._multi_cursor_active = False
+    
+    def _update_multi_cursor_display(self):
+        """Update visual display of multi-cursors."""
+        if not self._multi_cursors:
+            return
+        
+        extra_selections = []
+        doc_len = self.document().characterCount() - 1
+        
+        # Highlight format for selections
+        sel_format = QTextCharFormat()
+        sel_format.setBackground(QColor("#264f78"))
+        sel_format.setForeground(QColor("#ffffff"))
+        
+        for anchor, pos in self._multi_cursors:
+            # Bounds check
+            if anchor > doc_len or pos > doc_len:
+                continue
+            
+            try:
+                selection = QTextEdit.ExtraSelection()
+                selection.format = sel_format
+                
+                cursor_sel = QTextCursor(self.document())
+                cursor_sel.setPosition(min(anchor, doc_len))
+                cursor_sel.setPosition(min(pos, doc_len), QTextCursor.MoveMode.KeepAnchor)
+                selection.cursor = cursor_sel
+                
+                extra_selections.append(selection)
+            except:
+                pass
+        
+        self.setExtraSelections(extra_selections)
+    
+    def clearMultiCursors(self):
+        """Clear all multi-cursors."""
+        self._multi_cursors = []
+        self._multi_cursor_active = False
+        self.setExtraSelections([])
+        self.highlightCurrentLine()
     
     def toggleComment(self):
         """Toggle line comment."""
@@ -723,7 +797,31 @@ class CodeEditor(QPlainTextEdit):
         return self._language
     
     def keyPressEvent(self, event: QKeyEvent):
-        """Handle key press events for auto-indent."""
+        """Handle key press events for auto-indent and multi-cursor."""
+        
+        # Handle multi-cursor editing
+        if self._multi_cursor_active and self._multi_cursors:
+            # Escape to exit multi-cursor mode
+            if event.key() == Qt.Key.Key_Escape:
+                self.clearMultiCursors()
+                return
+            
+            # Handle text input for multi-cursors
+            if event.text() and event.text().isprintable():
+                self._multi_cursor_insert(event.text())
+                return
+            
+            # Handle backspace
+            if event.key() == Qt.Key.Key_Backspace:
+                self._multi_cursor_backspace()
+                return
+            
+            # Handle delete
+            if event.key() == Qt.Key.Key_Delete:
+                self._multi_cursor_delete()
+                return
+        
+        # Normal key handling
         if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
             # Auto-indent on enter
             cursor = self.textCursor()
@@ -753,3 +851,98 @@ class CodeEditor(QPlainTextEdit):
                 super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
+    
+    def _multi_cursor_insert(self, text: str):
+        """Insert text at all cursor positions."""
+        if not self._multi_cursors:
+            return
+        
+        # Sort cursors by position (descending) to avoid position shifts affecting earlier edits
+        sorted_cursors = sorted(self._multi_cursors, key=lambda x: x[0], reverse=True)
+        
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        
+        new_cursors = []
+        
+        for anchor, pos in sorted_cursors:
+            try:
+                c = QTextCursor(self.document())
+                doc_len = self.document().characterCount() - 1  # -1 because Qt counts the final \0
+                
+                anchor = min(anchor, doc_len)
+                pos = min(pos, doc_len)
+                
+                c.setPosition(anchor)
+                c.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
+                c.insertText(text)
+                
+                # New position after insert (collapsed cursor)
+                new_pos = anchor + len(text)
+                new_cursors.append((new_pos, new_pos))
+            except Exception as e:
+                print(f"Multi-cursor error: {e}")
+        
+        cursor.endEditBlock()
+        
+        # Update cursor positions (reverse back to original order)
+        self._multi_cursors = list(reversed(new_cursors))
+        
+        # Defer display update to avoid issues during edit block
+        QTimer.singleShot(0, self._update_multi_cursor_display)
+    
+    def _multi_cursor_backspace(self):
+        """Delete character before all cursor positions."""
+        sorted_cursors = sorted(self._multi_cursors, key=lambda x: x[0], reverse=True)
+        
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        
+        new_cursors = []
+        for anchor, pos in sorted_cursors:
+            c = QTextCursor(self.document())
+            if anchor != pos:
+                # Delete selection
+                c.setPosition(anchor)
+                c.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
+                c.removeSelectedText()
+                new_cursors.append((anchor, anchor))
+            elif anchor > 0:
+                # Delete one char before
+                c.setPosition(anchor)
+                c.deletePreviousChar()
+                new_cursors.append((anchor - 1, anchor - 1))
+            else:
+                new_cursors.append((anchor, anchor))
+        
+        cursor.endEditBlock()
+        
+        self._multi_cursors = list(reversed(new_cursors))
+        self._update_multi_cursor_display()
+    
+    def _multi_cursor_delete(self):
+        """Delete character after all cursor positions."""
+        sorted_cursors = sorted(self._multi_cursors, key=lambda x: x[0], reverse=True)
+        
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        
+        new_cursors = []
+        for anchor, pos in sorted_cursors:
+            c = QTextCursor(self.document())
+            if anchor != pos:
+                # Delete selection
+                c.setPosition(anchor)
+                c.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
+                c.removeSelectedText()
+                new_cursors.append((anchor, anchor))
+            else:
+                # Delete one char after
+                c.setPosition(anchor)
+                c.deleteChar()
+                new_cursors.append((anchor, anchor))
+        
+        cursor.endEditBlock()
+        
+        self._multi_cursors = list(reversed(new_cursors))
+        self._update_multi_cursor_display()
