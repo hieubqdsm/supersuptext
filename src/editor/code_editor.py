@@ -332,8 +332,8 @@ class CodeEditor(QPlainTextEdit):
         font_metrics = QFontMetrics(font)
         self.setTabStopDistance(font_metrics.horizontalAdvance(' ') * tab_size)
         
-        # Word wrap
-        if self.settings.get('editor/word_wrap', False):
+        # Word wrap - default to enabled for better readability
+        if self.settings.get('editor/word_wrap', True):
             self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         else:
             self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
